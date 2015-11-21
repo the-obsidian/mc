@@ -9,8 +9,9 @@ import (
 )
 
 type Command struct {
-	Run  func(cmd *Command, args []string)
-	Flag flag.FlagSet
+	Run         func(cmd *Command, args []string)
+	Flag        flag.FlagSet
+	NeedsServer bool
 
 	Usage    string // first word must be command name
 	Category string

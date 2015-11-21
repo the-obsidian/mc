@@ -13,7 +13,7 @@ import (
 )
 
 var commands = []*Command{
-	//cmdInstall,
+	cmdInstall,
 	//cmdVersion,
 	cmdHelp,
 
@@ -56,6 +56,13 @@ func main() {
 		cmd.Flag.Usage = func() {
 			cmd.PrintUsage()
 		}
+
+		if cmd.NeedsServer {
+			if exists, err := fileExists("server.yml"); err != nil || !exists {
+				printFatal("server.yml not found - is this a server directory?")
+			}
+		}
+
 		if err := cmd.Flag.Parse(args[1:]); err == flag.ErrHelp {
 			cmdHelp.Run(cmdHelp, args[:1])
 		} else if err != nil {

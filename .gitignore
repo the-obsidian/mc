@@ -1,4 +1,5 @@
 mc
+server.yml
 *.exe
 *.*~
 *.swp
