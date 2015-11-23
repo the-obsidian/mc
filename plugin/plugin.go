@@ -1,8 +1,10 @@
 package plugin
 
 import (
+	"archive/zip"
 	"crypto/sha1"
 	"fmt"
+	"io"
 	"os"
 	"path"
 
@@ -10,17 +12,18 @@ import (
 	"github.com/the-obsidian/mc/util"
 )
 
+// Plugin represents an individual Minecraft plugin dependency
 type Plugin struct {
-	Name       string
-	URI        string
-	Sha        string
-	Processors []Processor `yaml:"-"`
-
-	originalProcessors []map[string]interface{} `yaml:"processors"`
+	Name               string
+	URI                string
+	Sha                string
+	Processors         []Processor              `yaml:"-"`
+	OriginalProcessors []map[string]interface{} `yaml:"processors,flow"`
 }
 
+// Init processes the config into the required structure
 func (p *Plugin) Init() error {
-	for _, pr := range p.originalProcessors {
+	for _, pr := range p.OriginalProcessors {
 		processor, err := NewProcessorFromConfig(p, pr)
 		if err != nil {
 			return err
@@ -31,6 +34,8 @@ func (p *Plugin) Init() error {
 	return nil
 }
 
+// Install downlods the plugin if it doesn't exist, processes it, and
+// installs it to the plugins dir
 func (p *Plugin) Install() error {
 	dest := path.Join(".", "plugins", p.Name+".jar")
 	tmpDir := path.Join(".", ".tmp", "plugins", p.Name)
@@ -61,6 +66,13 @@ func (p *Plugin) Install() error {
 		return err
 	}
 
+	for _, pr := range p.Processors {
+		err = pr.Process(p)
+		if err != nil {
+			return fmt.Errorf("failed to run processor: %s", err)
+		}
+	}
+
 	err = checksum(tmpDownload, hash, checksumValue)
 	if err != nil {
 		return fmt.Errorf("failed to checksum download: %v", err)
@@ -71,31 +83,71 @@ func (p *Plugin) Install() error {
 		return err
 	}
 
-	return nil
+	return os.RemoveAll(tmpDir)
 }
 
+// Processor represents a plugin post-processor
 type Processor interface {
-	Process()
+	Process(p *Plugin) error
 }
 
+// NewProcessorFromConfig builds a Processor from a config
 func NewProcessorFromConfig(p *Plugin, config map[string]interface{}) (Processor, error) {
 	switch config["type"] {
 	case "unzip":
 		pr := &UnzipProcessor{
-			Type:  "unzip",
-			Files: config["files"].([]string),
+			Type: "unzip",
+			File: config["file"].(string),
 		}
 		return pr, nil
 	default:
 		return nil, fmt.Errorf("invalid processor type: %v", config["type"])
 	}
-
-	return nil, nil
 }
 
+// UnzipProcessor unzips a file to extract a plugin
 type UnzipProcessor struct {
-	Type  string
-	Files []string
+	Type string
+	File string
 }
 
-func (pr *UnzipProcessor) Process() {}
+// Process performs the unzip
+func (pr *UnzipProcessor) Process(p *Plugin) error {
+	tmpDir := path.Join(".", ".tmp", "plugins", p.Name)
+	tmpDownload := path.Join(tmpDir, "download")
+	tmpDest := path.Join(tmpDir, "download-extract")
+
+	r, err := zip.OpenReader(tmpDownload)
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+
+	for _, f := range r.File {
+		if f.Name != pr.File {
+			continue
+		}
+
+		fmt.Printf("Extracting file %s\n", f.Name)
+		rc, err := f.Open()
+		if err != nil {
+			return err
+		}
+		defer rc.Close()
+
+		f, err := os.OpenFile(tmpDest, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+
+		_, err = io.Copy(f, rc)
+		if err != nil {
+			return err
+		}
+
+		return os.Rename(tmpDest, tmpDownload)
+	}
+
+	return fmt.Errorf("failed to extract file ")
+}
